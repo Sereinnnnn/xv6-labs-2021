@@ -16,6 +16,8 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 extern char trampoline[]; // trampoline.S
 
 // Make a direct-map page table for the kernel.
+// 创建内核页表，返回一个指向页表的指针
+// 内核页表包括对 UART0 寄存器、virtio 磁盘接口、PLIC（外部中断控制器）、内核代码段、内核数据段、trampoline（陷阱处理的跳板代码）、内核栈等进行映射
 pagetable_t
 kvmmake(void)
 {
@@ -50,6 +52,7 @@ kvmmake(void)
 }
 
 // Initialize the one kernel_pagetable
+// 初始化内核的页表，并将结果存储在 kernel_pagetable 中
 void
 kvminit(void)
 {
@@ -58,6 +61,8 @@ kvminit(void)
 
 // Switch h/w page table register to the kernel's page table,
 // and enable paging.
+// 将硬件页表寄存器切换到内核页表，并启用分页（将物理内存划分为固定大小的块，称为页面；同样大小的逻辑内存块称为页框）。
+// 硬件页表寄存器存储了当前正在使用的页表的地址
 void
 kvminithart()
 {
@@ -77,8 +82,10 @@ kvminithart()
 //   21..29 -- 9 bits of level-1 index.
 //   12..20 -- 9 bits of level-0 index.
 //    0..11 -- 12 bits of byte offset within the page.
+// 在页表中查找虚拟地址 va 对应的页表项；alloc 非零则会创建缺失的页表项。
+// 返回页表项指针
 pte_t *
-walk(pagetable_t pagetable, uint64 va, int alloc)
+walk(pagetable_t pagetable, uint64 va, int alloc) // （页表指针，虚拟地址，是否分配新的页表项）
 {
   if(va >= MAXVA)
     panic("walk");
@@ -100,8 +107,9 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
 // Look up a virtual address, return the physical address,
 // or 0 if not mapped.
 // Can only be used to look up user pages.
+// 返回虚拟地址 va 对应的物理地址，如果没有映射则返回0。
 uint64
-walkaddr(pagetable_t pagetable, uint64 va)
+walkaddr(pagetable_t pagetable, uint64 va) // （页表指针，虚拟地址）
 {
   pte_t *pte;
   uint64 pa;
@@ -122,9 +130,10 @@ walkaddr(pagetable_t pagetable, uint64 va)
 
 // add a mapping to the kernel page table.
 // only used when booting.
-// does not flush TLB or enable paging.
+// does not flush TLB or enable paging. 不刷新 TLB 或启动分页
+// 将一个地址范围映射到内核页表中，主要用于内核启动阶段的设备和段映射。
 void
-kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm)
+kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm) // （内核页表指针，虚拟地址，物理地址，映射大小，权限标志）
 {
   if(mappages(kpgtbl, va, sz, pa, perm) != 0)
     panic("kvmmap");
@@ -134,8 +143,9 @@ kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm)
 // physical addresses starting at pa. va and size might not
 // be page-aligned. Returns 0 on success, -1 if walk() couldn't
 // allocate a needed page-table page.
+// 创建 PTEs，将虚拟地址从 va 开始映射到物理地址 pa 开始。
 int
-mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
+mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm) // （页表指针，虚拟地址，映射大小，物理地址，权限标志）
 {
   uint64 a, last;
   pte_t *pte;
@@ -162,8 +172,9 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 // Remove npages of mappings starting from va. va must be
 // page-aligned. The mappings must exist.
 // Optionally free the physical memory.
+//  解除从虚拟地址 va 开始的 npages 个页面的映射，可选择是否释放物理内存。
 void
-uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
+uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free) // npages是解除映射的页数
 {
   uint64 a;
   pte_t *pte;
@@ -188,6 +199,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 
 // create an empty user page table.
 // returns 0 if out of memory.
+// 创建一个空的用户页表
 pagetable_t
 uvmcreate()
 {
@@ -202,8 +214,9 @@ uvmcreate()
 // Load the user initcode into address 0 of pagetable,
 // for the very first process.
 // sz must be less than a page.
+// 将用户初始化代码加载到页表的地址0
 void
-uvminit(pagetable_t pagetable, uchar *src, uint sz)
+uvminit(pagetable_t pagetable, uchar *src, uint sz) // （用户页表指针，源数据指针，初始化大小）
 {
   char *mem;
 
@@ -217,6 +230,8 @@ uvminit(pagetable_t pagetable, uchar *src, uint sz)
 
 // Allocate PTEs and physical memory to grow process from oldsz to
 // newsz, which need not be page aligned.  Returns new size or 0 on error.
+// 为进程从 oldsz 扩展到 newsz 分配 PTEs 和物理内存。
+// 返回新的大小或者0（表示错误）
 uint64
 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 {
@@ -247,6 +262,8 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 // newsz.  oldsz and newsz need not be page-aligned, nor does newsz
 // need to be less than oldsz.  oldsz can be larger than the actual
 // process size.  Returns the new process size.
+// 释放用户内存页面，将进程大小从 oldsz 减小到 newsz
+// 返回新的大小
 uint64
 uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 {
@@ -263,6 +280,7 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 
 // Recursively free page-table pages.
 // All leaf mappings must already have been removed.
+// 递归释放页表页面
 void
 freewalk(pagetable_t pagetable)
 {
@@ -283,6 +301,7 @@ freewalk(pagetable_t pagetable)
 
 // Free user memory pages,
 // then free page-table pages.
+// 释放用户内存页面，然后释放页表页面
 void
 uvmfree(pagetable_t pagetable, uint64 sz)
 {
@@ -297,6 +316,7 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 // physical memory.
 // returns 0 on success, -1 on failure.
 // frees any allocated pages on failure.
+// 复制父进程的内存到子进程的页表和物理内存
 int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
@@ -329,6 +349,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 
 // mark a PTE invalid for user access.
 // used by exec for the user stack guard page.
+// 将用户地址 va 对应的页表项标记为无效
 void
 uvmclear(pagetable_t pagetable, uint64 va)
 {

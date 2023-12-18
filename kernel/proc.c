@@ -6,6 +6,8 @@
 #include "proc.h"
 #include "defs.h"
 
+// 简化的操作系统内核的进程管理部分
+
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -29,6 +31,7 @@ struct spinlock wait_lock;
 // Allocate a page for each process's kernel stack.
 // Map it high in memory, followed by an invalid
 // guard page.
+// 为每个进程的内核栈分配一页内存，并映射到内核页表中。这个函数在操作系统启动时被调用。
 void
 proc_mapstacks(pagetable_t kpgtbl) {
   struct proc *p;
@@ -43,6 +46,7 @@ proc_mapstacks(pagetable_t kpgtbl) {
 }
 
 // initialize the proc table at boot time.
+// 初始化进程表和相关锁。
 void
 procinit(void)
 {
@@ -59,6 +63,7 @@ procinit(void)
 // Must be called with interrupts disabled,
 // to prevent race with process being moved
 // to a different CPU.
+// 返回当前 CPU 的 ID。
 int
 cpuid()
 {
@@ -68,6 +73,7 @@ cpuid()
 
 // Return this CPU's cpu struct.
 // Interrupts must be disabled.
+// 返回当前 CPU 的 struct cpu 结构。
 struct cpu*
 mycpu(void) {
   int id = cpuid();
@@ -76,6 +82,7 @@ mycpu(void) {
 }
 
 // Return the current struct proc *, or zero if none.
+// 返回当前进程的 struct proc 结构。
 struct proc*
 myproc(void) {
   push_off();
@@ -85,6 +92,7 @@ myproc(void) {
   return p;
 }
 
+// 分配一个新的进程ID。
 int
 allocpid() {
   int pid;
@@ -101,6 +109,7 @@ allocpid() {
 // If found, initialize state required to run in the kernel,
 // and return with p->lock held.
 // If there are no free procs, or a memory allocation fails, return 0.
+// 从进程表中分配一个未使用的进程结构，初始化并返回。其中还包括分配内存和设置上下文等操作。
 static struct proc*
 allocproc(void)
 {
@@ -147,6 +156,7 @@ found:
 // free a proc structure and the data hanging from it,
 // including user pages.
 // p->lock must be held.
+// 释放进程结构相关的资源，包括内存和文件描述符等
 static void
 freeproc(struct proc *p)
 {
@@ -168,6 +178,7 @@ freeproc(struct proc *p)
 
 // Create a user page table for a given process,
 // with no user memory, but with trampoline pages.
+// 为进程创建一个新的用户页表，映射 trampoline 和 trapframe
 pagetable_t
 proc_pagetable(struct proc *p)
 {
@@ -222,6 +233,7 @@ uchar initcode[] = {
 };
 
 // Set up first user process.
+// 设置第一个用户进程，分配用户内存并复制 initcode 到用户空间
 void
 userinit(void)
 {
@@ -249,6 +261,7 @@ userinit(void)
 
 // Grow or shrink user memory by n bytes.
 // Return 0 on success, -1 on failure.
+// 扩展或收缩用户内存，返回 0 表示成功，-1 表示失败
 int
 growproc(int n)
 {
@@ -269,6 +282,7 @@ growproc(int n)
 
 // Create a new process, copying the parent.
 // Sets up child kernel stack to return as if from fork() system call.
+// 创建一个新的进程，复制父进程的内存等信息
 int
 fork(void)
 {
@@ -320,6 +334,7 @@ fork(void)
 
 // Pass p's abandoned children to init.
 // Caller must hold wait_lock.
+// 将 p 的孩子交给 init 进程
 void
 reparent(struct proc *p)
 {
@@ -336,6 +351,7 @@ reparent(struct proc *p)
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
 // until its parent calls wait().
+// 退出当前进程，标记为僵尸进程
 void
 exit(int status)
 {
@@ -380,6 +396,7 @@ exit(int status)
 
 // Wait for a child process to exit and return its pid.
 // Return -1 if this process has no children.
+// 等待子进程退出并返回其 PID
 int
 wait(uint64 addr)
 {
@@ -434,6 +451,7 @@ wait(uint64 addr)
 //  - swtch to start running that process.
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
+// 多核 CPU 的进程调度器
 void
 scheduler(void)
 {
@@ -471,6 +489,7 @@ scheduler(void)
 // be proc->intena and proc->noff, but that would
 // break in the few places where a lock is held but
 // there's no process.
+// 切换到调度器，释放锁并保存当前进程的上下文
 void
 sched(void)
 {
@@ -492,6 +511,7 @@ sched(void)
 }
 
 // Give up the CPU for one scheduling round.
+// 放弃 CPU 使用权，将当前进程状态设置为可运行
 void
 yield(void)
 {
@@ -502,20 +522,19 @@ yield(void)
   release(&p->lock);
 }
 
-// A fork child's very first scheduling by scheduler()
-// will swtch to forkret.
+// 当 scheduler() 第一次调度 fork 的子进程时
+// 会切换到 forkret 函数。
 void
 forkret(void)
 {
   static int first = 1;
 
-  // Still holding p->lock from scheduler.
+  // 仍然持有来自 scheduler 的 p->lock。
   release(&myproc()->lock);
 
   if (first) {
-    // File system initialization must be run in the context of a
-    // regular process (e.g., because it calls sleep), and thus cannot
-    // be run from main().
+    // 文件系统初始化必须在常规进程的上下文中运行
+    //（例如，因为它调用 sleep），因此不能从 main() 运行。
     first = 0;
     fsinit(ROOTDEV);
   }
@@ -523,39 +542,36 @@ forkret(void)
   usertrapret();
 }
 
-// Atomically release lock and sleep on chan.
-// Reacquires lock when awakened.
+// 原子性地释放锁并在 chan 上睡眠。
+// 唤醒后重新获取锁。
 void
 sleep(void *chan, struct spinlock *lk)
 {
   struct proc *p = myproc();
   
-  // Must acquire p->lock in order to
-  // change p->state and then call sched.
-  // Once we hold p->lock, we can be
-  // guaranteed that we won't miss any wakeup
-  // (wakeup locks p->lock),
-  // so it's okay to release lk.
+  // 必须获取 p->lock 以更改 p->state 并调用 sched。
+  // 一旦我们持有 p->lock，就可以确保不会错过任何唤醒
+  //（wakeup 会锁定 p->lock），因此释放 lk 是可以的。
 
-  acquire(&p->lock);  //DOC: sleeplock1
+  acquire(&p->lock);  // DOC: sleeplock1
   release(lk);
 
-  // Go to sleep.
+  // 进入睡眠状态。
   p->chan = chan;
   p->state = SLEEPING;
 
   sched();
 
-  // Tidy up.
+  // 清理。
   p->chan = 0;
 
-  // Reacquire original lock.
+  // 重新获取原始锁。
   release(&p->lock);
   acquire(lk);
 }
 
-// Wake up all processes sleeping on chan.
-// Must be called without any p->lock.
+// 唤醒所有在 chan 上睡眠的进程。
+// 必须在没有任何 p->lock 的情况下调用。
 void
 wakeup(void *chan)
 {
@@ -572,9 +588,9 @@ wakeup(void *chan)
   }
 }
 
-// Kill the process with the given pid.
-// The victim won't exit until it tries to return
-// to user space (see usertrap() in trap.c).
+// 终止具有给定 pid 的进程。
+// 受害者不会退出，直到尝试返回到用户空间
+//（请参见 trap.c 中的 usertrap()）。
 int
 kill(int pid)
 {
@@ -585,7 +601,7 @@ kill(int pid)
     if(p->pid == pid){
       p->killed = 1;
       if(p->state == SLEEPING){
-        // Wake process from sleep().
+        // 唤醒进程从 sleep() 中返回。
         p->state = RUNNABLE;
       }
       release(&p->lock);
@@ -596,9 +612,9 @@ kill(int pid)
   return -1;
 }
 
-// Copy to either a user address, or kernel address,
-// depending on usr_dst.
-// Returns 0 on success, -1 on error.
+// 将数据复制到用户地址或内核地址，
+// 取决于 usr_dst。
+// 成功返回 0，错误返回 -1。
 int
 either_copyout(int user_dst, uint64 dst, void *src, uint64 len)
 {
@@ -611,9 +627,9 @@ either_copyout(int user_dst, uint64 dst, void *src, uint64 len)
   }
 }
 
-// Copy from either a user address, or kernel address,
-// depending on usr_src.
-// Returns 0 on success, -1 on error.
+// 从用户地址或内核地址复制数据，
+// 取决于 usr_src。
+// 成功返回 0，错误返回 -1。
 int
 either_copyin(void *dst, int user_src, uint64 src, uint64 len)
 {
@@ -626,18 +642,19 @@ either_copyin(void *dst, int user_src, uint64 src, uint64 len)
   }
 }
 
-// Print a process listing to console.  For debugging.
-// Runs when user types ^P on console.
-// No lock to avoid wedging a stuck machine further.
+// 在控制台上打印进程列表。用于调试。
+// 当用户在控制台上键入 ^P 时运行。
+// 为了避免使被卡住的机器陷入更深的困境，
+// 不使用锁。
 void
 procdump(void)
 {
   static char *states[] = {
-  [UNUSED]    "unused",
-  [SLEEPING]  "sleep ",
-  [RUNNABLE]  "runble",
-  [RUNNING]   "run   ",
-  [ZOMBIE]    "zombie"
+    [UNUSED]    "未使用",
+    [SLEEPING]  "睡眠中",
+    [RUNNABLE]  "可运行",
+    [RUNNING]   "运行中",
+    [ZOMBIE]    "僵尸"
   };
   struct proc *p;
   char *state;
