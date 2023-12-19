@@ -1,5 +1,6 @@
 //
 // low-level driver routines for 16550a UART.
+//  Xv6 操作系统中与 16550a UART（通用异步收发传输器）相关的底层驱动程序
 //
 
 #include "types.h"
@@ -13,6 +14,8 @@
 // the UART control registers are memory-mapped
 // at address UART0. this macro returns the
 // address of one of the registers.
+// 通过 Reg(reg) 宏，可以获取 UART 控制寄存器的地址，其中 reg 代表寄存器的偏移量。
+// 各个寄存器的定义也通过宏给出，例如 RHR 代表接收保持寄存器，THR 代表传输保持寄存器等。
 #define Reg(reg) ((volatile unsigned char *)(UART0 + reg))
 
 // the UART control registers.
@@ -49,13 +52,16 @@ extern volatile int panicked; // from printf.c
 
 void uartstart();
 
+// 该函数用于初始化 UART。
 void
 uartinit(void)
 {
-  // disable interrupts.
+  // disable interrupts. 
+  // 禁用中断
   WriteReg(IER, 0x00);
 
-  // special mode to set baud rate.
+  // special mode to set baud rate. 
+  // 设置波特率
   WriteReg(LCR, LCR_BAUD_LATCH);
 
   // LSB for baud rate of 38.4K.
@@ -65,13 +71,15 @@ uartinit(void)
   WriteReg(1, 0x00);
 
   // leave set-baud mode,
-  // and set word length to 8 bits, no parity.
+  // and set word length to 8 bits, no parity. 
+  // 配置数据位数为8位
   WriteReg(LCR, LCR_EIGHT_BITS);
 
   // reset and enable FIFOs.
   WriteReg(FCR, FCR_FIFO_ENABLE | FCR_FIFO_CLEAR);
 
-  // enable transmit and receive interrupts.
+  // enable transmit and receive interrupts. 
+  // 启用传输和接收中断
   WriteReg(IER, IER_TX_ENABLE | IER_RX_ENABLE);
 
   initlock(&uart_tx_lock, "uart");
