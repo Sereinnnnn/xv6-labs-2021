@@ -1,3 +1,4 @@
+
 // 磁盘上的文件系统形式
 // Both the kernel and user programs use this header file.
 
@@ -69,4 +70,3 @@ struct dirent {
   ushort inum;
   char name[DIRSIZ];
 };
-

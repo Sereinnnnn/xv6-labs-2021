@@ -4,15 +4,8 @@
 #include "kernel/stat.h"
 #include "kernel/riscv.h"
 #include "kernel/fs.h"
-#include "user/user.h"
 #include "kernel/types.h"
-#include "kernel/riscv.h"
-#include "kernel/defs.h"
-#include "kernel/date.h"
-#include "kernel/param.h"
-#include "kernel/memlayout.h"
-#include "kernel/spinlock.h"
-#include "kernel/proc.h"
+#include "user/user.h"
 
 void test0();
 void test1();
@@ -23,7 +16,7 @@ char buf[SZ];
 int
 main(int argc, char *argv[])
 {
-  test0();
+  // test0();
   test1();
   exit(0);
 }
@@ -154,8 +147,7 @@ test0()
 
 void test1()
 {
-  // 获取当前时间戳
-  int time_begin = ticks;
+  int m = ntas(0); // 统计初始时文件系统的 I/O 操作次数
   char file[3];
   enum { N = 100, BIG=100, NCHILD=2 };
   
@@ -206,6 +198,6 @@ void test1()
     wait(0);
   }
 
-  int time_end = ticks;
-  printf("test1 OK\n,use time %d",time_end-time_begin);
+  int n = ntas(1);
+  printf("test1 OK\n,IO counts %d",n-m);
 }
