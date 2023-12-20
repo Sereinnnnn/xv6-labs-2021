@@ -16,7 +16,7 @@ char buf[SZ];
 int
 main(int argc, char *argv[])
 {
-  // test0();
+  test0();
   test1();
   exit(0);
 }

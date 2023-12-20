@@ -7,7 +7,7 @@
 #include "fs.h"
 #include "buf.h"
 
-#define NBUCKET 7
+#define NBUCKET 13
 
 // struct {
 //   struct spinlock lock;
@@ -56,7 +56,10 @@ write_cache(struct buf *take_buf, uint dev, uint blockno)
   
   // 将缓存块标记为无效，表示需要重新读取数据。
   /*
-    因为缓存块即将被用于存储新的数据。通过将 valid 设置为0，标志着该缓存块的内容已经过期，需要在下次使用前重新从存储设备读取最新的数据。这是文件系统中一种常见的策略，确保缓存中的数据与实际存储设备上的数据保持同步。在需要访问特定块的数据时，系统首先检查缓存中是否已经有了这个块的副本，如果有，就可以直接使用。但是，如果 valid 标志为0，系统会重新从设备中读取数据，确保缓存中的内容是最新的。
+    因为缓存块即将被用于存储新的数据。通过将 valid 设置为0，标志着该缓存块的内容已经过期，需要在下次使用前重新从存储设备读取最新的数据。
+    这是文件系统中一种常见的策略，确保缓存中的数据与实际存储设备上的数据保持同步。
+    在需要访问特定块的数据时，系统首先检查缓存中是否已经有了这个块的副本，如果有，就可以直接使用。
+    但是，如果 valid 标志为0，系统会重新从设备中读取数据，确保缓存中的内容是最新的。
   */
   take_buf->valid = 0;
   
@@ -130,7 +133,7 @@ bget(uint dev, uint blockno)
     {
       b->refcnt++; // 增加引用计数
       release(&bcache.lock[id]); // 释放哈希桶的锁
-      acquiresleep(&b->lock); // 获取缓存块的锁
+      acquiresleep(&b->lock); // 获取缓存块的锁，来对这个缓存块进行操作，例如增加引用计数（b->refcnt++）或者写入新的数据。
       return b;
     }
     if(b->refcnt == 0)
@@ -139,6 +142,7 @@ bget(uint dev, uint blockno)
     }
   }
 
+  // bget是获取缓冲区，如果当前缓冲区上没有对应的块，就找到桶中最后一个引用为 0的缓存块，初始化后返回。
   if(take_buf) // 存在引用计数为零的缓冲区块 take_buf
   {
     write_cache(take_buf, dev, blockno); // 则调用 write_cache 将其初始化
@@ -153,26 +157,27 @@ bget(uint dev, uint blockno)
   struct buf *last_take = 0;
   struct buf *tmp;
 
-
+  // 选定了一个引用计数为零且时间戳最小的缓冲区块 take_buf
   for(int i = 1; i <= NBUCKET/2; ++i)
   {
+    // 循环中选择的哈希桶索引是连续的，避免在哈希桶数组中出现跳跃式的访问
     int j = id - i >=0 ? id - i : id + (NBUCKET - i); // 当前要访问的哈希桶的索引
-    // int j = (id + i)%NBUCKET;
+    // 写成 int j = (id + i)%NBUCKET; 也可以,但取模运算可能带来的性能开销。
 
-    acquire(&bcache.lock[j]);
+    acquire(&bcache.lock[j]); // 获取当前哈希桶的锁
 
     // 在当前哈希桶中的缓冲区链表上进行遍历，寻找引用计数为零的缓冲区块
     for(b = bcache.head[j].next, tmp = &(bcache.head[j]); b; b = b->next, tmp = tmp->next)
     {
-      if (b->refcnt == 0) // 如果找到引用计数为零的缓冲区块，记录相关信息
+      if (b->refcnt == 0) // 如果找到引用计数为零的缓冲区块
       {
-        if (b->time < time) 
+        if (b->time < time) // 并且其时间戳比记录的时间戳 time 更小，记录相关信息
         {
           time = b->time;
           last_take = tmp;
           take_buf = b;
 
-          // 如果之前已经锁住了其他哈希桶，释放之前的锁
+          // 如果之前已经锁住了其他哈希桶，且之前的锁是被持有的状态（holding()返回非零值），释放之前的锁
           if (lock_num != -1 && lock_num != j && holding(&bcache.lock[lock_num])) 
             release(&bcache.lock[lock_num]);
 
@@ -182,26 +187,29 @@ bget(uint dev, uint blockno)
       }
     }
 
-    // 如果不是当前哈希桶，并且之前锁住了其他哈希桶，释放之前的锁
-    if (j!=id && j!=lock_num && holding(&bcache.lock[j])) 
+    // 如果当前哈希桶索引 j 不等于初始哈希桶索引 id，且之前锁住了其他哈希桶索引 lock_num，且之前的锁是被持有的状态，就释放之前的锁
+    // 其实是对当前循环中的桶的检查，如果它里面没有 引用计数为零且时间戳最小的缓冲区块，就释放它的锁
+    if (j != id && j != lock_num && holding(&bcache.lock[j])) 
       release(&bcache.lock[j]);
   }
 
   if (!take_buf) 
     panic("bget: no buffers");
 
-  last_take->next = take_buf->next; // 从原哈希桶中移除
+  // 通过将上一个引用计数为零的缓冲区块的 next 指针指向 take_buf 的下一个缓冲区块，实现了从链表中移除 take_buf。
+  last_take->next = take_buf->next; 
+  // 将 take_buf 的 next 指针置为0，确保 take_buf 不再与原哈希桶中的其他缓冲区块相连接
   take_buf->next = 0;
   release(&bcache.lock[lock_num]);
 
-  last_b->next = take_buf; // 将 take_buf 插入到新的哈希桶中
+  last_b->next = take_buf; // 将从其他桶拿来的 take_buf 插入到初始的哈希桶中
   take_buf->next = 0;
-  write_cache(take_buf, dev, blockno); // 初始化并释放锁
+  write_cache(take_buf, dev, blockno); // 对缓存块进行初始化，写入磁盘
 
-  release(&bcache.lock[id]);
-  acquiresleep(&take_buf->lock);
+  release(&bcache.lock[id]); // 释放当前哈希桶的锁
+  acquiresleep(&take_buf->lock); // 获取缓存块的锁
 
-  return take_buf;
+  return take_buf; // 返回找到的缓存块 
 }
 
 // 返回一个锁定的缓冲区（struct buf），该缓冲区包含指定块的内容。
@@ -212,7 +220,7 @@ bread(uint dev, uint blockno)
 
   // 获取具有指定设备和块号的缓冲区（如果缓冲区不在内存中，则将其读取到内存中）
   b = bget(dev, blockno);
-  // 如果缓冲区的内容无效（未被读取过），则通过virtio_disk_rw函数将其内容从磁盘读取到缓冲区中
+  // 如果缓冲区的内容无效（还没有填充上对应的磁盘的数据），则通过 virtio_disk_rw 函数将其内容从磁盘读取到缓冲区中
   if(!b->valid) {
     virtio_disk_rw(b, 0);
     b->valid = 1;
@@ -251,7 +259,7 @@ bwrite(struct buf *b)
 //   release(&bcache.lock);
 // }
 
-//获取锁，然后将块引用计数-1，并不明白提示所说的不用锁的方法是什么
+//获取锁，然后将块引用计数-1
 void
 brelse(struct buf *b)
 {
@@ -273,7 +281,7 @@ brelse(struct buf *b)
 //   release(&bcache.lock);
 // }
 
-//获取锁，引用计数+1
+// 获取锁，引用计数+1
 void
 bpin(struct buf *b) {
   int id = hash(b->blockno);
@@ -289,7 +297,8 @@ bpin(struct buf *b) {
 //   release(&bcache.lock);
 // }
 
-//获取锁，引用计数-1
+// 获取锁，引用计数-1
+// unpin：一个术语，表示取消引用或释放一个之前由某个操作引用的资源
 void
 bunpin(struct buf *b) {
   int id = hash(b->blockno);
