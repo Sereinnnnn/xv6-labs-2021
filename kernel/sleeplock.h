@@ -1,10 +1,30 @@
-// Long-term locks for processes
+/*
+  一个长期用于进程的睡眠锁
+
+  这个结构体被设计用来提供一种线程同步机制，
+  允许一个进程在持有锁的情况下进入睡眠状态，
+  而不会占用 CPU 时间。
+*/
+
 struct sleeplock {
-  uint locked;       // Is the lock held?
-  struct spinlock lk; // spinlock protecting this sleep lock
+  uint locked;       // 如果为1，表示锁已被某个进程持有
+  // 用于保护对sleeplock结构体的访问。
+  // 在获取和释放sleeplock时，需要先获取这个自旋锁，以确保对sleeplock结构体的访问是原子的
+  struct spinlock lk; 
   
-  // For debugging:
-  char *name;        // Name of lock.
+  // 用于调试目的:
+  char *name;        // 锁的名称，可以标识这个特定的sleeplock实例
   int pid;           // Process holding lock
 };
 
+/*
+  在这个实现中，`struct sleeplock` 包含了一个自旋锁 `struct spinlock lk`，而不是直接使用自旋锁作为 `sleeplock`。这样设计的主要原因是 `sleeplock` 需要支持进程的睡眠和唤醒操作，而自旋锁通常不适用于这种情况。
+
+  自旋锁是一种轻量级的锁，它通过持续忙等待（自旋）直到获取锁为止。在获取锁的过程中，如果锁已经被其他线程持有，当前线程会一直忙等待，不会释放 CPU。这对于短期的临界区保护是有效的，但对于长时间的睡眠操作不太适用。
+
+  `sleeplock` 的设计考虑到了进程可能需要睡眠，因此使用了一种更适合长时间等待的机制。
+  
+  !!! 当一个进程希望获取一个 `sleeplock`，但锁已经被其他进程持有时，它会调用 `sleep` 函数，将自己标记为睡眠状态，并释放锁。然后，当锁的持有者释放锁时，它会唤醒等待的进程，从而实现睡眠和唤醒的机制。
+
+  因此，`sleeplock` 结合了自旋锁和睡眠机制，以提供更灵活的线程同步和等待操作。这样设计可以有效地处理长时间的等待，而不会浪费 CPU 资源。
+*/

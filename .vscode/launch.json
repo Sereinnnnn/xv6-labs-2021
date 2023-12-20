@@ -7,9 +7,9 @@
       "request": "launch",
       "args": [],
       "stopAtEntry": false,
-      "externalConsole": false,
-      "cwd": "/home/oem/xv6-labs-2021/kernel",
-      "program": "/home/oem/xv6-labs-2021/kernel/build/Debug/outDebug",
+      "externalConsole": true,
+      "cwd": "e:/Desktop/_Major/操作系统/xv6-labs-2021/kernel",
+      "program": "e:/Desktop/_Major/操作系统/xv6-labs-2021/kernel/build/Debug/outDebug",
       "MIMode": "gdb",
       "miDebuggerPath": "gdb",
       "setupCommands": [

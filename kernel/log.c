@@ -216,6 +216,7 @@ log_write(struct buf *b)
 {
   int i;
 
+  // 通过acquire获取事务日志的锁，以确保对事务日志的访问是同步的
   acquire(&log.lock);
   if (log.lh.n >= LOGSIZE || log.lh.n >= log.size - 1)
     panic("too big a transaction");
