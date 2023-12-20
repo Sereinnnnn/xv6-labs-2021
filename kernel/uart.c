@@ -54,7 +54,7 @@ void uartstart();
 
 // 该函数用于初始化 UART。
 void
-uartinit(void)
+uartinit(void)     
 {
   // disable interrupts. 
   // 禁用中断

@@ -133,16 +133,25 @@ holding(struct spinlock *lk)
 // push_off/pop_off are like intr_off()/intr_on() except that they are matched:
 // it takes two pop_off()s to undo two push_off()s.  Also, if interrupts
 // are initially off, then push_off, pop_off leaves them off.
-
+// 用于关闭中断的函数
+// 目的是为了在执行一些关键代码段时确保不被中断打断，通常用于临界区的保护。
 void
 push_off(void)
 {
-  int old = intr_get();
+  int old = intr_get(); // intr_get() 函数获取当前中断状态（开启或关闭）并将其保存在变量 old 中
 
-  intr_off();
-  if(mycpu()->noff == 0)
-    mycpu()->intena = old;
-  mycpu()->noff += 1;
+  // 用 intr_off() 函数将中断关闭。
+  // 是一个用于关闭中断的函数，它可能使用特定的指令或系统调用来实现中断关闭。
+  /*
+    具体实现取决于操作系统和硬件平台。
+      在 x86 架构上，通常会使用 cli 汇编指令来关闭中断。这个指令将中断标志位清零，导致处理器不再响应中断。
+      这是一个临时性的中断关闭操作，可以通过后续的 sti 指令来重新开启中断。
+  */
+  intr_off(); 
+  if(mycpu()->noff == 0) // 如果它为 0，表示在调用 push_off 前中断是开启的
+    mycpu()->intena = old; // 保存的中断状态 old 赋值给 CPU 的 intena 字段; 为了保存调用 push_off 前的中断状态，以便在后续调用 pop_off 时恢复。
+  // 加 1，表示当前处于一个关闭中断的状态。这样可以多次调用 push_off，而在调用相同次数的 pop_off 之前，中断不会被开启。
+  mycpu()->noff += 1; 
 }
 
 void
