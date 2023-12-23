@@ -26,6 +26,7 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
+<<<<<<< HEAD
 #ifdef LAB_NET
 int connect(uint32, uint16, uint16);
 #endif
@@ -34,6 +35,11 @@ int pgaccess(void *base, int len, void *mask);
 // usyscall region
 int ugetpid(void);
 #endif
+=======
+void *mmap(void *addr, int length, int prot, int flags,
+           int fd, int offset);
+int munmap(void *addr, int length);
+>>>>>>> a9382b872433c9fa0669b0a56b312edb7ec1e80a
 
 // ulib.c
 int stat(const char*, struct stat*);
