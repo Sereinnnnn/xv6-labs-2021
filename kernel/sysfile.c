@@ -491,26 +491,21 @@ sys_mmap(void)
   struct file *f; 
   int length , prot, flags, offset; 
   uint64 addr; 
-
   // get args, 0:addr, 1:length, 2:prot, 3:flags, 5:offset, 4:fd=>*f
   if(argaddr(0, &addr) < 0
     || argint(1, &length) < 0 || argint(2, &prot) < 0 || argint(3, &flags) < 0 || argint(5, &offset) < 0 
     || argfd(4, 0, &f) < 0 )
     return -1;
-
   // mmap doesn't allow read/write mapping of a file opened read-only with MAP_SHARED
   // "or", "/" also meaning "and" in english when use "doesn't", "not" and so on
   if(f->readable && !f->writable && (prot & PROT_READ) && (prot & PROT_WRITE) && (flags & MAP_SHARED))
     return -1;
-  
   struct proc *p = myproc();
   int oldsz = p->sz;
-  
   // get va without anything by p->sz
   if(addr == 0){
     uint64 va = p->sz;
     int is_same = 0;
-    
     while(1){
       // avoid: some VAs may get same addr, becase we use 'lazy alloc'
       int i ;
@@ -530,7 +525,6 @@ sys_mmap(void)
     va += PGSIZE;
     }
   }
-
   for(int i = 0; i < 16; i++){
     // case: maybe remove and rebuild a vmas[i] when slots full
     // not case in test
@@ -549,7 +543,6 @@ sys_mmap(void)
       return addr;
     }
   }
-
   // failed, ret -1
   return -1;
 }
@@ -560,14 +553,11 @@ sys_munmap(void)
 {
   uint64 addr; 
   int length;
-
   // get args, 0:addr, 1:length
   if(argaddr(0, &addr) < 0 || argint(1, &length) < 0)
     return -1;
-  
   struct proc *p = myproc();
   int has_a_vma = 0;
-
   int i;
   for(i = 0 ; i < 16; i++){
     if(p->vmas[i].addr <= addr && addr < (p->vmas[i].addr + p->vmas[i].length)){
@@ -575,17 +565,14 @@ sys_munmap(void)
       break;
     }
   }
-
   // not find a vma, so ret -1
   if(has_a_vma == 0){
     return -1;
   }
-
   pte_t *pte = walk(p->pagetable, addr, 0);
   int offset = p->vmas[i].f->off; // addr is beginning of vma, so use file->off
   if(p->vmas[i].oldsz != addr) // addr is't beginning of vma, so use p->vmas[i].offset
     offset = p->vmas[i].offset;
-
   // If an unmapped page has been modified and the file is mapped MAP_SHARED,
   // write the page back to the file.
   if((*pte & PTE_V) && p->vmas[i].flags & MAP_SHARED){
@@ -629,12 +616,10 @@ sys_munmap(void)
 
   if((*pte & PTE_V) == 0) // don't write and uvmunmap(), only change data of vma
     return 0;
-
   // uvmunmap() after writing
   // find the VMA for the address range and unmap the specified pages
   // note: free physical memory => 'do_free = 1'
   uvmunmap(p->pagetable, addr, length/PGSIZE, 1);
-
   // success, ret 0
   return 0;
 }

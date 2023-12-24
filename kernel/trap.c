@@ -44,14 +44,13 @@ trapinithart(void)
 int
 mmap_lazyalloc(pagetable_t pagetable, uint64 va)
 { 
-  struct proc *p = myproc();
-  struct file *f;
-  int prot;
-  int has_a_vam = 0;
-  int perm = 0;
-  char *mem;
-  
-  // find va between vma.addr and vma.addr+vma.lenght
+  struct proc *p = myproc();  // 获取当前进程
+  struct file *f;             // 映射文件的文件结构
+  int prot;                   // 映射的保护标志
+  int has_a_vam = 0;          // 检查虚拟地址是否在任何VMA范围内的标志
+  int perm = 0;               // 映射的权限
+  char *mem;                  // 指向分配的物理内存的指针
+  // 查找包含虚拟地址va的VMA（虚拟内存区域）
   int i;
   for(i = 0; i < 16; i++){
     if(p->vmas[i].addr <= va && va < (p->vmas[i].addr + p->vmas[i].length)){
@@ -61,16 +60,13 @@ mmap_lazyalloc(pagetable_t pagetable, uint64 va)
       break;
     }
   }
-  
-  // not find vma, ret -1
+  // 如果虚拟地址不在任何VMA范围内，则返回-1
   if(has_a_vam == 0){
     return -1;
   }
-    
-  // PTE_U controls whether instructions in user mode are allowed to access the page; 
-  // if PTE_U is notset, the PTE can be used only in supervisor mode.
+  // 设置PTE_U以允许用户模式访问
   perm |= PTE_U;
-  // MAYBE sets PTE_R, PTE_W, PTE_X
+  // 设置PTE_R、PTE_W、PTE_X权限标志
   if(prot & PROT_READ){
     perm |= PTE_R;
   }
@@ -80,36 +76,29 @@ mmap_lazyalloc(pagetable_t pagetable, uint64 va)
   if(prot & PROT_EXEC){
     perm |= PTE_X;
   }
-
-  // big bug: not alloc mem(4096) to all virtual addresses
+  // 分配物理内存，注意这里存在一个大bug，没有为所有虚拟地址分配mem(4096)的内存
   if((mem = kalloc()) == 0){
     return -1;
   }
-  // In mmaptest/makefile()
-  // create a file to be mapped, containing
-  // 1.5 pages of 'A' and half a page of zeros.
-  // so we must set 0 of length after getting mem
+  // 在mmaptest/makefile()中，创建一个要映射的文件，其中包含1.5页的'A'和半页的零。
+  // 因此，在获取mem之后，我们必须将长度的0设置为mem
   memset(mem, 0, PGSIZE);
 
-  // note: mem is new address of phycial memory
+  // 将物理内存映射到虚拟地址
   if(mappages(pagetable, va, PGSIZE, (uint64)mem, perm) == -1){
     kfree(mem);
     return -1;
   }
-
-  // we not set PTE_D, becasue we always directly wirite back to file in munmap()
-
-  // length is the number of bytes to map; it might not be the same as the file's length.
-  // read data from file, then put data to va
+  // 没有设置PTE_D，因为总是直接将数据写回文件中，在munmap()中进行处理
+  // 读取文件数据，然后将数据放入va
   ilock(f->ip);
-  if(readi(f->ip, 1, va, va - p->vmas[i].addr, PGSIZE) < 0){ // readi offset by 'va - p->vmas[i].addr'  
+  if(readi(f->ip, 1, va, va - p->vmas[i].addr, PGSIZE) < 0){ // readi中的偏移量为 'va - p->vmas[i].addr'  
     iunlock(f->ip);
     return -1;
   }
   iunlock(f->ip);
   p->vmas[i].offset += PGSIZE;
-
-  // success, ret 0
+  // 成功，返回0
   return 0;
 }
 
