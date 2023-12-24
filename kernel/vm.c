@@ -90,43 +90,55 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
   return &pagetable[PX(0, va)];
 }
 
-// Look up a virtual address, return the physical address,
-// or 0 if not mapped.
-// Can only be used to look up user pages.
+// 查找虚拟地址对应的物理地址，如果没有映射则返回0。
+// 仅用于查找用户页。
 uint64
 walkaddr(pagetable_t pagetable, uint64 va)
 {
   pte_t *pte;
   uint64 pa;
-  struct proc *p=myproc();  // lab5-3
+  struct proc *p = myproc();  // lab5-3
 
+  // 如果虚拟地址大于等于最大虚拟地址，返回0
   if(va >= MAXVA)
     return 0;
 
+  // 调用 walk 函数获取页表项指针
   pte = walk(pagetable, va, 0);
+
   // lazy allocation - lab5-3
+  // 如果没有找到页表项或者页表项标志 PTE_V 为0
   if(pte == 0 || (*pte & PTE_V) == 0) {
-    // va is on the user heap
+    // va 在用户堆上
     if(va >= PGROUNDUP(p->trapframe->sp) && va < p->sz){
         char *pa;
+        // 分配内存
         if ((pa = kalloc()) == 0) {
             return 0;
         }
+        // 将分配的内存清零
         memset(pa, 0, PGSIZE);
+        // 映射页表
         if (mappages(p->pagetable, PGROUNDDOWN(va), PGSIZE,
                      (uint64) pa, PTE_W | PTE_R | PTE_U) != 0) {
+            // 映射失败时释放内存并返回0
             kfree(pa);
             return 0;
         }
     } else {
-        return 0;
+        return 0; // 不在用户堆上，返回0
     }
   }
+
+  // 如果页表项标志 PTE_U 为0，表示不是用户页
   if((*pte & PTE_U) == 0)
     return 0;
+
+  // 获取物理地址
   pa = PTE2PA(*pte);
   return pa;
 }
+
 
 // add a mapping to the kernel page table.
 // only used when booting.
@@ -187,33 +199,48 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 // Remove npages of mappings starting from va. va must be
 // page-aligned. The mappings must exist.
 // Optionally free the physical memory.
+// 参数:
+//   - pagetable: 进程的页表
+//   - va: 起始虚拟地址
+//   - npages: 虚拟内存页面数量
+//   - do_free: 是否释放相关的物理内存页
+// 解除虚拟内存的映射
 void
 uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 {
   uint64 a;
   pte_t *pte;
 
+  // 检查虚拟地址是否对齐到页面
   if((va % PGSIZE) != 0)
     panic("uvmunmap: not aligned");
 
+  // 遍历虚拟地址范围内的每一页
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
+    // 通过页表查找虚拟地址对应的页表项
     if((pte = walk(pagetable, a, 0)) == 0) {
-      continue;  // lab5-3
-//      panic("uvmunmap: walk");    // lab5-3
+      // 如果页表项不存在，继续下一个页面
+      continue;  
+      // panic("uvmunmap: walk");  // 启用 panic 来检测错误
     }
+    // 如果页面未映射，继续下一个页面
     if((*pte & PTE_V) == 0) {
-      continue;     // lab5-2
-//      panic("uvmunmap: not mapped");  // lab5-2
+      continue;     
+      // panic("uvmunmap: not mapped");  // 启用 panic 来检测错误
     }
+    // 如果是叶子节点而非页表，产生 panic
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
+    // 如果需要释放物理内存页，执行释放操作
     if(do_free){
       uint64 pa = PTE2PA(*pte);
       kfree((void*)pa);
     }
+    // 清除页表项
     *pte = 0;
   }
 }
+
 
 // create an empty user page table.
 // returns 0 if out of memory.
@@ -336,7 +363,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0) {
-      continue;     // lab5-3
+      continue;     
 //      panic("uvmcopy: pte should exist"); // lab5-3
     }
     if((*pte & PTE_V) == 0) {

@@ -38,6 +38,10 @@ sys_wait(void)
   return wait(p);
 }
 
+// 系统调用 sys_sbrk 的实现
+// 返回值:
+//   -1: 参数错误或操作失败
+//   其他: 新的堆顶地址
 uint64
 sys_sbrk(void)
 {
@@ -45,24 +49,32 @@ sys_sbrk(void)
   int n;
   struct proc *p;
 
+  // 从用户态获取参数 n
   if(argint(0, &n) < 0)
     return -1;
+
+  // 获取当前进程
   p = myproc();
+
+  // 获取当前堆顶地址
   addr = p->sz;
+
   // lab5-1
+  // 增加堆的大小但不分配内存
   if(n >= 0 && addr + n >= addr){
-    p->sz += n;    // increase size but not allocate memory
+    p->sz += n;
   } else if(n < 0 && addr + n >= PGROUNDUP(p->trapframe->sp)){
-    // handle negative n and addr must be above user stack - lab5-3
+    // 处理负数的 n，并确保 addr 在用户栈之上 - lab5-3
+    // 调用 uvmdealloc 函数释放内存
     p->sz = uvmdealloc(p->pagetable, addr, addr + n);
   } else {
-    return -1;
+    return -1; // 参数错误
   }
 
-//  if(growproc(n) < 0)
-//    return -1;
+  // 返回新的堆顶地址
   return addr;
 }
+
 
 uint64
 sys_sleep(void)
