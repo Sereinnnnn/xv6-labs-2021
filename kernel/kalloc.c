@@ -23,6 +23,9 @@ struct {
   struct run *freelist;
 } kmem;
 
+int useReference[PHYSTOP/PGSIZE];
+struct spinlock ref_count_lock;
+
 void
 kinit()
 {
@@ -51,6 +54,16 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
+  int temp; // 存储引用计数值
+  acquire(&ref_count_lock); // 获取引用计数锁
+  // 如果使用引用不为零，减少引用计数
+  useReference[(uint64)pa/PGSIZE] -= 1;
+  temp = useReference[(uint64)pa/PGSIZE]; // 获取当前引用计数值
+  release(&ref_count_lock); // 释放引用计数锁
+  // 如果引用计数仍然大于零，表示仍有其他引用，直接返回，不进行后续操作
+  if (temp > 0)
+  return;
+
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
@@ -74,6 +87,15 @@ kalloc(void)
   r = kmem.freelist;
   if(r)
     kmem.freelist = r->next;
+
+  if(r)
+  {
+  kmem.freelist = r->next;
+  acquire(&ref_count_lock); // 获取引用计数锁
+  // 初始化引用计数为 1
+  useReference[(uint64)r / PGSIZE] = 1;
+  release(&ref_count_lock); // 释放引用计数锁
+  }
   release(&kmem.lock);
 
   if(r)

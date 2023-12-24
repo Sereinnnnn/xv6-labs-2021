@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -308,29 +310,43 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
-  pte_t *pte;
-  uint64 pa, i;
-  uint flags;
-  char *mem;
-
+  pte_t *pte; // 页表项指针
+  uint64 pa, i; // 物理地址和循环计数
+  uint flags; // 页表项标志
+  // char *mem;
+  // 遍历要复制的内容
   for(i = 0; i < sz; i += PGSIZE){
-    if((pte = walk(old, i, 0)) == 0)
-      panic("uvmcopy: pte should exist");
-    if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
-    pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
-      goto err;
-    }
+  // 获取旧页表项指针并检查
+  if((pte = walk(old, i, 0)) == 0)
+  panic("uvmcopy: pte should exist");
+  if((*pte & PTE_V) == 0)
+  panic("uvmcopy: page not present");
+  /*
+  (1) 只有当父进程内存页面是可写的时候，所有将被设置为 COW 和只读；
+  (2) 否则，它们都是只读的，但不标记为 COW，因为它们是只读的，不会被写入。
+  */
+  if (*pte & PTE_W) {
+  // set PTE_W to 0
+  *pte &= ~PTE_W;
+  // set PTE_RSW to 1
+  // set COW page
+  *pte |= PTE_RSW;
   }
-  return 0;
-
- err:
+  pa = PTE2PA(*pte);
+  // 增加引用次数
+  acquire(&ref_count_lock);
+  useReference[pa/PGSIZE] += 1;
+  release(&ref_count_lock);
+  flags = PTE_FLAGS(*pte);
+  // if((mem = kalloc()) == 0)
+  // goto err;
+  // memmove(mem, (char*)pa, PGSIZE);
+  if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){ // 映射新页表项到新页表
+  // kfree(mem);
+  goto err;
+  }
+  }
+  err:
   uvmunmap(new, 0, i / PGSIZE, 1);
   return -1;
 }
