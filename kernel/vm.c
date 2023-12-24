@@ -17,35 +17,36 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+// 映射一些重要的硬件设备和内核地址到给定的页表 pgtbl 中，以便内核能够访问这些设备和数据。
+void 
+kvm_map_pagetable(pagetable_t pgtbl) {
 
-void kvm_map_pagetable(pagetable_t pgtbl) {
-  
-  // uart registers
+  // 将 UART 寄存器映射到虚拟内存
   kvmmap(pgtbl, UART0, UART0, PGSIZE, PTE_R | PTE_W);
 
-  // virtio mmio disk interface
+  // 将 virtio mmio 磁盘接口映射到虚拟内存
   kvmmap(pgtbl, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
 
-  // CLINT
-  // local interrupt controller, used to configure timers. not needed after the kernel boots up.
-  // no need to map to process-specific kernel page tables.
-  // it also lies at 0x02000000, which is lower than PLIC's 0x0c000000
-  // and will conflict with process memory, which is located at the lower end of
-  // the address space. 
-
+  // CLINT 在内核启动期间需要，将 CLINT（核间中断控制器）映射到虚拟内存，权限标志设置为可读写
+  /*
+   // 本地中断控制器，用于配置定时器。 内核启动后不需要。
+   // 无需映射到特定于进程的内核页表。
+   // 它位于 0x02000000，低于 PLIC 的 0x0c000000
+   // 避免与位于低端的进程内存发生地址空间冲突。
+   映射的大小为 0x10000 字节，即 64KB。
+  */
   // kvmmap(pgtbl, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
 
-  // PLIC
+  // 将 PLIC（平台级中断控制器）映射到虚拟内存
   kvmmap(pgtbl, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
 
-  // map kernel text executable and read-only.
+  // 将内核文本区域映射为可执行和只读
   kvmmap(pgtbl, KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
 
-  // map kernel data and the physical RAM we'll make use of.
+  // 将内核数据区域和物理 RAM 映射为可读和可写
   kvmmap(pgtbl, (uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
 
-  // map the trampoline for trap entry/exit to
-  // the highest virtual address in the kernel.
+  // 将 trap entry/exit 的 trampoline 映射到内核的最高虚拟地址
   kvmmap(pgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
 }
 
@@ -60,26 +61,21 @@ kvminit_newpgtbl()
   return pgtbl;
 }
 
-/*
- * create a direct-map page table for the kernel.
- */
 void
 kvminit()
 {
-  kernel_pagetable = kvminit_newpgtbl();
-  // CLINT *is* however required during kernel boot up and
-  // we should map it for the global kernel pagetable
-  kvmmap(kernel_pagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+  // 仍然需要有全局的内核页表，用于内核 boot 过程，以及无进程在运行时使用。
+  kernel_pagetable = kvminit_newpgtbl(); 
 }
 
-// Switch h/w page table register to the kernel's page table,
-// and enable paging.
+// 切换硬件页表寄存器到内核的页表，并启用分页。
 void
 kvminithart()
 {
   w_satp(MAKE_SATP(kernel_pagetable));
   sfence_vma();
 }
+
 
 // Return the address of the PTE in page table pagetable
 // that corresponds to virtual address va.  If alloc!=0,
@@ -140,9 +136,9 @@ walkaddr(pagetable_t pagetable, uint64 va)
   return pa;
 }
 
-// add a mapping to a kernel page table. (lab3 enables standalone kernel page tables for each and every process)
-// only used when booting.
-// does not flush TLB or enable paging.
+// 添加到内核页表的映射。 （lab3 为每个进程启用独立的内核页表）
+// lab3之前，仅在启动时使用；不刷新 TLB 或启用分页。
+// 将某个逻辑地址映射到某个物理地址
 void
 kvmmap(pagetable_t pgtbl, uint64 va, uint64 pa, uint64 sz, int perm)
 {
@@ -150,24 +146,33 @@ kvmmap(pagetable_t pgtbl, uint64 va, uint64 pa, uint64 sz, int perm)
     panic("kvmmap");
 }
 
-// translate a kernel virtual address to
-// a physical address. only needed for
-// addresses on the stack.
-// assumes va is page aligned.
+// 将内核虚拟地址转换为物理地址。 仅需要用于堆栈上的地址。假设 va 是页对齐的。
+/*
+  通过访问内核页表将内核虚拟地址转换为物理地址。
+  它假定输入的虚拟地址是页面对齐的，然后计算页面内的偏移。
+  接着，通过调用 walk 函数获取虚拟地址对应的页表项，检查该页表项的有效性，并最终计算物理地址。
+  如果有任何错误（比如无效的页表项），函数会引发 panic。
+*/
 uint64
 kvmpa(pagetable_t kernelpgtbl, uint64 va)
 {
+  // 计算虚拟地址在页面内的偏移
   uint64 off = va % PGSIZE;
   pte_t *pte;
   uint64 pa;
 
-  pte = walk(kernelpgtbl, va, 0); // read from the process-specific kernel pagetable instead
+  // 从进程特定的内核页表中读取
+  pte = walk(kernelpgtbl, va, 0);
   if(pte == 0)
     panic("kvmpa");
   if((*pte & PTE_V) == 0)
     panic("kvmpa");
+
+  // 获取页面表项对应的物理地址
   pa = PTE2PA(*pte);
-  return pa+off;
+
+  // 计算最终的物理地址
+  return pa + off;
 }
 
 // Create PTEs for virtual addresses starting at va that refer to
@@ -298,21 +303,26 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
   return newsz;
 }
 
-// Just like uvmdealloc, but without freeing the memory.
-// Used for syncing up kernel page-table's mapping of user memory.
+// 类似于 uvmdealloc，但不释放内存。
+// 用于同步内核页表对用户内存的映射。
 uint64
 kvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 {
+  // 如果新的大小大于或等于旧的大小，不需要处理
   if(newsz >= oldsz)
     return oldsz;
 
+  // 如果新的大小小于旧的大小，需要更新页表以反映新的大小
   if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
+    // 计算需要取消映射的页数
     int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
+    // 在页表中取消映射指定范围的页面
     uvmunmap(pagetable, PGROUNDUP(newsz), npages, 0);
   }
 
   return newsz;
 }
+
 
 // Recursively free page-table pages.
 // All leaf mappings must already have been removed.
@@ -334,21 +344,22 @@ freewalk(pagetable_t pagetable)
   kfree((void*)pagetable);
 }
 
-// Free a process-specific kernel page-table,
-// without freeing the underlying physical memory
+// 释放进程特定的内核页表，但不释放底层的物理内存
 void
 kvm_free_kernelpgtbl(pagetable_t pagetable)
 {
-  // there are 2^9 = 512 PTEs in a page table.
+  // 一个页表中有 2^9 = 512 个 PTE（页表项）
   for(int i = 0; i < 512; i++){
     pte_t pte = pagetable[i];
     uint64 child = PTE2PA(pte);
     if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
-      // this PTE points to a lower-level page table.
+      // 这个 PTE 指向一个更低级别的页表。
+      // 递归调用以释放更低级别的页表
       kvm_free_kernelpgtbl((pagetable_t)child);
-      pagetable[i] = 0;
+      pagetable[i] = 0;  // 将当前 PTE 置为 0，以确保不再引用已释放的内存块
     }
   }
+  // 释放当前页表
   kfree((void*)pagetable);
 }
 
@@ -401,6 +412,9 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 // Copy some of the mappings from src into dst.
 // Only copies the page table and not the physical memory.
 // returns 0 on success, -1 on failure.
+// 将 src 页表的一部分页映射关系拷贝到 dst 页表中。
+// 只拷贝页表项，不拷贝实际的物理页内存。
+// 成功返回0，失败返回 -1
 int
 kvmcopymappings(pagetable_t src, pagetable_t dst, uint64 start, uint64 sz)
 {
@@ -408,17 +422,17 @@ kvmcopymappings(pagetable_t src, pagetable_t dst, uint64 start, uint64 sz)
   uint64 pa, i;
   uint flags;
 
-  // PGROUNDUP: prevent re-mapping already mapped pages (eg. when doing growproc)
+  // PGROUNDUP: 对齐页边界，防止 remap
   for(i = PGROUNDUP(start); i < start + sz; i += PGSIZE){
     if((pte = walk(src, i, 0)) == 0)
       panic("kvmcopymappings: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("kvmcopymappings: page not present");
     pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
-    // `& ~PTE_U` marks the page as kernel page and not user page.
-    // Required or else kernel can not access these pages.
-    if(mappages(dst, i, PGSIZE, pa, flags & ~PTE_U) != 0){
+    // `& ~PTE_U` 表示将该页的权限设置为非用户页
+    // 必须设置该权限，RISC-V 中内核是无法直接访问用户页的。
+    flags = PTE_FLAGS(*pte) & ~PTE_U;
+    if(mappages(dst, i, PGSIZE, pa, flags) != 0){
       goto err;
     }
   }
@@ -426,7 +440,7 @@ kvmcopymappings(pagetable_t src, pagetable_t dst, uint64 start, uint64 sz)
   return 0;
 
  err:
-  uvmunmap(dst, PGROUNDUP(start), (i - PGROUNDUP(start)) / PGSIZE, 0);
+  uvmunmap(dst, 0, i / PGSIZE, 0);
   return -1;
 }
 

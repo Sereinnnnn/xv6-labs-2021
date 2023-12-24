@@ -84,24 +84,24 @@ enum procstate { UNUSED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
 // Per-process state
 struct proc {
-  struct spinlock lock;
+  struct spinlock lock;        // 进程的锁，用于同步访问进程结构
 
   // p->lock must be held when using these:
-  enum procstate state;        // Process state
-  struct proc *parent;         // Parent process
-  void *chan;                  // If non-zero, sleeping on chan
-  int killed;                  // If non-zero, have been killed
-  int xstate;                  // Exit status to be returned to parent's wait
-  int pid;                     // Process ID
+  enum procstate state;        // 进程状态
+  struct proc *parent;         // 父进程指针
+  void *chan;                  // 如果非零，表示进程正在等待 chan
+  int killed;                  // 如果非零，表示进程被终止
+  int xstate;                  // 退出状态，返回给父进程的 wait
+  int pid;                     // 进程 ID
 
-  // these are private to the process, so p->lock need not be held.
-  uint64 kstack;               // Virtual address of kernel stack
-  uint64 sz;                   // Size of process memory (bytes)
-  pagetable_t pagetable;       // User page table
-  struct trapframe *trapframe; // data page for trampoline.S
-  struct context context;      // swtch() here to run process
-  struct file *ofile[NOFILE];  // Open files
-  struct inode *cwd;           // Current directory
-  char name[16];               // Process name (debugging)
-  pagetable_t kernelpgtbl;      // Kernel page table
+  // 这些是进程私有的，所以在使用它们时不需要持有 p->lock。
+  uint64 kstack;               // 内核栈的虚拟地址
+  uint64 sz;                   // 进程内存的大小（字节）
+  pagetable_t pagetable;       // 用户页表
+  struct trapframe *trapframe; // trampoline.S 的数据页
+  struct context context;      // 进程上下文，用于调度
+  struct file *ofile[NOFILE];  // 打开的文件数组
+  struct inode *cwd;           // 当前工作目录
+  char name[16];               // 进程名称（用于调试）
+  pagetable_t kernelpgtbl;     // 内核页表
 };

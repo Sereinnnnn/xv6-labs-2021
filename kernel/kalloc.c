@@ -63,22 +63,30 @@ kfree(void *pa)
   release(&kmem.lock);
 }
 
-// Allocate one 4096-byte page of physical memory.
-// Returns a pointer that the kernel can use.
-// Returns 0 if the memory cannot be allocated.
+// 分配一个物理内存页面，大小为4096字节（PGSIZE）。
+// 返回内核可以使用的指针。
+// 如果无法分配内存，则返回0。
 void *
 kalloc(void)
 {
-  struct run *r;
+  struct run *r; // xv6内核中用于管理空闲内存页面的数据结构。
 
+  // 获取内存管理器锁
   acquire(&kmem.lock);
+
+  // 从空闲列表中获取一个空闲内存页面
   r = kmem.freelist;
   if(r)
     kmem.freelist = r->next;
+
+  // 释放内存管理器锁
   release(&kmem.lock);
 
+  // 将分配的内存填充为垃圾数据
   if(r)
-    memset((char*)r, 5, PGSIZE); // fill with junk
+    memset((char*)r, 5, PGSIZE);
+
+  // 返回分配的内存页面的指针
   return (void*)r;
 }
 

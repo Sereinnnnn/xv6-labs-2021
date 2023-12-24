@@ -209,13 +209,14 @@ w_mtvec(uint64 x)
 
 #define MAKE_SATP(pagetable) (SATP_SV39 | (((uint64)pagetable) >> 12))
 
-// supervisor address translation and protection;
-// holds the address of the page table.
+// supervisor 地址翻译和保护；
+// 保存页表的地址。
 static inline void 
 w_satp(uint64 x)
 {
   asm volatile("csrw satp, %0" : : "r" (x));
 }
+
 
 static inline uint64
 r_satp()

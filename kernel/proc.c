@@ -30,9 +30,22 @@ procinit(void)
   initlock(&pid_lock, "nextpid");
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
+      // 注释掉以下关于内核栈和guard page的创建
       // note for blog: 内核页表本来是只有一个的，所有进程共用，所以需要为不同进程创建多个内核栈，并 map 到不同位置
       // lab3exp2 中，添加了为每个进程创建单独的内核页表的设计，所以可以每个页表只分配一个内核栈并 map 到固定位置。
       // （同个页表不同位置 -> 不同页表同一位置）
+      /*
+        // Allocate a page for the process's kernel stack.
+        // Map it high in memory, followed by an invalid
+        // guard page.
+        // char *pa = kalloc();
+        // if(pa == 0)
+        //   panic("kalloc");
+        // uint64 va = KSTACK((int) (p - proc));
+        // kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+        // p->kstack = va;
+      */
+      
   }
 
   kvminithart();
@@ -79,59 +92,66 @@ allocpid() {
   return pid;
 }
 
-// Look in the process table for an UNUSED proc.
-// If found, initialize state required to run in the kernel,
-// and return with p->lock held.
-// If there are no free procs, or a memory allocation fails, return 0.
+// 在进程表中查找一个UNUSED的进程。
+// 如果找到，初始化在内核中运行所需的状态，并在返回时保持p->lock锁定。
+// 如果没有可用的进程，或者内存分配失败，则返回0。
 static struct proc*
 allocproc(void)
 {
   struct proc *p;
 
+  // 遍历进程表
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
     if(p->state == UNUSED) {
+      // 找到了一个UNUSED的进程
       goto found;
     } else {
+      // 进程不是UNUSED状态，释放锁并继续查找下一个进程
       release(&p->lock);
     }
   }
+
+  // 没有可用的进程
   return 0;
 
 found:
+  // 为进程分配唯一的PID
   p->pid = allocpid();
 
-  // Allocate a trapframe page.
+  // 分配一个 trapframe 页面，用于保存进程的上下文
+  /*
+    trapframe是一个用于保存中断或异常处理期间寄存器状态的结构。
+    这个结构通常用于保存被中断或异常打断的程序的执行上下文。
+    在上下文切换时，操作系统会保存当前进程的trapframe，并在以后的某个时候恢复它，以便程序继续执行
+  */
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
     release(&p->lock);
     return 0;
   }
 
-  // An empty user page table.
+  // 创建一个空的用户页表
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
+    // 用户页表分配失败，释放之前分配的资源，返回0
     freeproc(p);
     release(&p->lock);
     return 0;
   }
 
-  // Make a new kernel pagetable for the new process
+  // 为新进程创建一个新的内核页表
   p->kernelpgtbl = kvminit_newpgtbl();
-  // printf("kernel_pagetable: %p\n", p->kernelpgtbl);
 
-  // Allocate a page for the process's kernel stack.
-  // Map it high in memory, followed by an invalid
-  // guard page.
+  // 为进程的内核栈分配一页物理内存
   char *pa = kalloc();
   if(pa == 0)
     panic("kalloc");
-  uint64 va = KSTACK((int)0); // fixed location for kstack position
-  // printf("map krnlstack va: %p to pa: %p\n", va, pa);
+  uint64 va = KSTACK((int)0); // 固定位置，用于指定内核栈的虚拟地址
+  // 将物理内存映射到高地址空间，并在后面加上一个无效的guard page
   kvmmap(p->kernelpgtbl, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
   p->kstack = va;
 
-  // Set up new context to start executing at forkret,
-  // which returns to user space.
+  // 设置新上下文，以在forkret处开始执行，该函数返回到用户空间
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
@@ -139,19 +159,24 @@ found:
   return p;
 }
 
-// free a proc structure and the data hanging from it,
-// including user pages.
-// p->lock must be held.
+
+// 释放一个进程结构以及与之关联的数据，包括用户页。
+// p->lock 必须被持有。
 static void
 freeproc(struct proc *p)
 {
-  if(p->trapframe)
-    kfree((void*)p->trapframe);
-  p->trapframe = 0;
+  // 如果存在 trapframe，释放它
+  if(p->trapframe) // 检查进程结构中的 trapframe 字段是否存在（非空）
+    kfree((void*)p->trapframe); // 释放 trapframe 所指向的内存块
+  p->trapframe = 0; // 确保不再引用已释放的内存块
+
+  // 如果存在页表，释放它以及用户页
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
   p->sz = 0;
+
+  // 重置进程的标识符等信息
   p->pid = 0;
   p->parent = 0;
   p->name[0] = 0;
@@ -159,23 +184,19 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   
-  // free process-specific kernel stack
+  // 释放特定于进程的内核栈
   void *kstack_pa = (void *)kvmpa(p->kernelpgtbl, p->kstack);
-  // printf("trace: free kstack %p\n", kstack_pa);
   kfree(kstack_pa);
   p->kstack = 0;
-  
-  // proc_freepagetable can not be used here, since it not only frees the pagetable itself, 
-  // but also frees all the leaf pages within the pagetable, which in this case are critical
-  // pages for the kernel's function. kfree() only frees the pagetable itself.
-  // edit: using only kfree(p->kernelpgtbl) here will lead to memory leak since
-  // PTEs inside the kernel page table were allocated using kalloc and not freed.
-  
-  // printf("trace: freepgtbl %p\n",p->kernelpgtbl);
+
+  // 释放进程特定的内核页表，确保不会导致内存泄漏
   kvm_free_kernelpgtbl(p->kernelpgtbl);
   p->kernelpgtbl = 0;
+
+  // 将进程状态标记为 UNUSED
   p->state = UNUSED;
 }
+
 
 // Create a user page table for a given process,
 // with no user memory, but with trampoline pages.
@@ -482,13 +503,12 @@ wait(uint64 addr)
   }
 }
 
-// Per-CPU process scheduler.
-// Each CPU calls scheduler() after setting itself up.
-// Scheduler never returns.  It loops, doing:
-//  - choose a process to run.
-//  - swtch to start running that process.
-//  - eventually that process transfers control
-//    via swtch back to the scheduler.
+/*
+  每个CPU在设置好自己之后调用scheduler()，调度程序永远不会返回。 
+  它循环执行：  
+  ① 选择要运行的进程。 ② 使用 swtch 切换到开始运行该进程。 ③ 该进程通过 swtch 将控制权返回给调度器。
+*/
+// 调度器函数，负责选择下一个要运行的进程
 void
 scheduler(void)
 {
@@ -497,31 +517,29 @@ scheduler(void)
   
   c->proc = 0;
   for(;;){
-    // Avoid deadlock by ensuring that devices can interrupt.
+    // 通过确保设备可以中断来避免死锁
     intr_on();
     
     int found = 0;
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
       if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
+        // 切换到选定的进程。进程在跳回我们之前
+        // 必须释放其锁，然后重新获取锁
         p->state = RUNNING;
         c->proc = p;
 
-        // switch to process-specific kernel page table
+        // 切换到特定于进程的内核页表
         w_satp(MAKE_SATP(p->kernelpgtbl));
         sfence_vma();
-        // printf("trace: loaded kernel pagetable %p\n", p->kernelpgtbl);
         
         swtch(&c->context, &p->context);
 
-        // switch kernel page table back to the globally shared kernel_pagetable
+        // 切换内核页表回全局共享的 kernel_pagetable
         kvminithart();
 
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
+        // 进程暂时完成运行。
+        // 在返回之前，进程应该已经更改了它的 p->state。
         c->proc = 0;
 
         found = 1;
@@ -529,15 +547,18 @@ scheduler(void)
       release(&p->lock);
     }
 #if !defined (LAB_FS)
+    // 如果没有找到可运行的进程，等待中断以避免死锁
     if(found == 0) {
       intr_on();
       asm volatile("wfi");
     }
 #else
+    // 如果没有找到可运行的进程，继续循环
     ;
 #endif
   }
 }
+
 
 // Switch to scheduler.  Must hold only p->lock
 // and have changed proc->state. Saves and restores
